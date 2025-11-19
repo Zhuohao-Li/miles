@@ -97,10 +97,10 @@ OPTIMIZER_ARGS=(
 )
 
 WANDB_ARGS=(
-   --use-wandb
-   --wandb-project miles-dapo
-   --wandb-group qwen3-4B-test-multi-turn
-   --wandb-key ${WANDB_KEY}
+   # --use-wandb
+   # --wandb-project miles-dapo
+   # --wandb-group qwen3-4B-test-multi-turn
+   # --wandb-key ${WANDB_KEY}
 )
 
 SGLANG_ARGS=(
