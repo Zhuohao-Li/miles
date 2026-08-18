@@ -1424,13 +1424,15 @@ def get_miles_extra_args_provider(add_custom_arguments=None):
                 choices=[
                     "grpo",
                     "gspo",
+                    "rloo",
                     "reinforce_plus_plus",
                     "reinforce_plus_plus_baseline",
                     "ppo",
                 ],
                 default="grpo",
                 help=(
-                    "Advantage estimator to use. Note: on-policy distillation (OPD) is now orthogonal "
+                    "Advantage estimator to use. RLOO applies a leave-one-out baseline within each prompt group. "
+                    "Note: on-policy distillation (OPD) is now orthogonal "
                     "to the advantage estimator. Use --opd-kl-coef > 0 to enable OPD on top of any estimator."
                 ),
             )
@@ -1479,7 +1481,7 @@ def get_miles_extra_args_provider(add_custom_arguments=None):
                 "--disable-rewards-normalization",
                 action="store_false",
                 dest="rewards_normalization",
-                help="Disable rewards normalization",
+                help="Disable optional rewards normalization. RLOO's leave-one-out baseline still applies.",
             )
             parser.add_argument(
                 "--use-rollout-entropy",

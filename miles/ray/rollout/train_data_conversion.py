@@ -240,7 +240,12 @@ def _normalize_rewards_by_rollout(
 
         rollout_rewards = torch.tensor(shared_rewards, dtype=torch.float)
         normalized_rollout_rewards = rollout_rewards - rollout_rewards.mean()
-        if args.advantage_estimator in ["grpo", "gspo"] and args.grpo_std_normalization and len(rollout_rewards) > 1:
+        if args.advantage_estimator == "rloo":
+            if len(rollout_rewards) == 1:
+                normalized_rollout_rewards = rollout_rewards
+            else:
+                normalized_rollout_rewards *= len(rollout_rewards) / (len(rollout_rewards) - 1)
+        elif args.advantage_estimator in ["grpo", "gspo"] and args.grpo_std_normalization and len(rollout_rewards) > 1:
             rollout_std = rollout_rewards.std()
             if rollout_std > 0:
                 normalized_rollout_rewards = normalized_rollout_rewards / (rollout_std + 1e-6)
@@ -264,7 +269,8 @@ def _post_process_rewards(
         return f(args, samples)
 
     raw_rewards = [sample.get_reward_value(args) for sample in samples]
-    if args.advantage_estimator in ["grpo", "gspo", "reinforce_plus_plus_baseline"] and args.rewards_normalization:
+    normalize_rewards = args.rewards_normalization or args.advantage_estimator == "rloo"
+    if args.advantage_estimator in ["grpo", "gspo", "rloo", "reinforce_plus_plus_baseline"] and normalize_rewards:
         normalized_rewards = _normalize_rewards_by_rollout(args, samples, raw_rewards, prompt_group_sizes)
         return raw_rewards, normalized_rewards
 

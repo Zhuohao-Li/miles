@@ -58,6 +58,7 @@ def get_advantage_estimator(name: str) -> AdvantageEstimator:
 
 @register_advantage_estimator("grpo")
 @register_advantage_estimator("gspo")
+@register_advantage_estimator("rloo")
 def _compute_grpo(inputs: AdvantageEstimatorInput) -> tuple[list[torch.Tensor], list[torch.Tensor]]:
     rewards = torch.tensor(inputs.rewards, dtype=torch.float32, device=inputs.kl[0].device)
     returns = get_grpo_returns(rewards, inputs.kl)

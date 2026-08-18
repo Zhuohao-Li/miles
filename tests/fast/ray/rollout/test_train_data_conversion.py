@@ -261,6 +261,39 @@ class TestPostProcessRewards:
         _, processed = _post_process_rewards(args, samples, custom_reward_post_process_func=None)
         assert abs(sum(processed) / 4) < 1e-5
 
+    def test_rloo_uses_leave_one_out_baseline(self):
+        args = make_args(
+            advantage_estimator="rloo",
+            rewards_normalization=False,
+            grpo_std_normalization=True,
+        )
+        samples = make_samples_grouped(1, 4, rewards=[1.0, 2.0, 3.0, 4.0])
+
+        raw, processed = _post_process_rewards(args, samples, custom_reward_post_process_func=None)
+
+        assert raw == [1.0, 2.0, 3.0, 4.0]
+        assert processed == pytest.approx([-2.0, -2.0 / 3.0, 2.0 / 3.0, 2.0])
+
+    def test_rloo_singleton_keeps_reward(self):
+        args = make_args(advantage_estimator="rloo", rewards_normalization=True)
+        samples = make_samples_grouped(1, 1, rewards=[5.0])
+
+        _, processed = _post_process_rewards(args, samples, custom_reward_post_process_func=None)
+
+        assert processed == [5.0]
+
+    def test_rloo_counts_unique_rollouts(self):
+        args = make_args(advantage_estimator="rloo", rewards_normalization=True)
+        samples = [
+            make_sample(group_index=0, index=0, rollout_id=10, reward=0.0),
+            make_sample(group_index=0, index=1, rollout_id=11, reward=1.0),
+            make_sample(group_index=0, index=1, rollout_id=11, reward=1.0),
+        ]
+
+        _, processed = _post_process_rewards(args, samples, custom_reward_post_process_func=None)
+
+        assert processed == pytest.approx([-1.0, 1.0, 1.0])
+
     def test_reinforce_plus_plus_baseline_only_zero_mean_no_std(self):
         args = make_args(
             advantage_estimator="reinforce_plus_plus_baseline",

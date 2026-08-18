@@ -12,7 +12,7 @@ from miles.backends.training_utils.loss_hub.advantages import (
 
 
 def test_builtin_estimators_are_registered():
-    for name in ("grpo", "gspo", "ppo", "reinforce_plus_plus", "reinforce_plus_plus_baseline"):
+    for name in ("grpo", "gspo", "rloo", "ppo", "reinforce_plus_plus", "reinforce_plus_plus_baseline"):
         assert callable(get_advantage_estimator(name))
 
 
@@ -47,3 +47,22 @@ def test_registered_estimator_is_dispatched():
 def test_duplicate_estimator_is_rejected():
     with pytest.raises(ValueError, match="Advantage estimator 'grpo' is already registered"):
         register_advantage_estimator("grpo")(get_advantage_estimator("grpo"))
+
+
+def test_rloo_broadcasts_precomputed_group_advantages():
+    args = Namespace(advantage_estimator="rloo")
+
+    advantages, returns = compute_advantages(
+        args=args,
+        kl=[torch.zeros(2), torch.zeros(3)],
+        rewards=[-1.0, 1.0],
+        log_probs=None,
+        loss_masks=[torch.ones(2), torch.ones(3)],
+        total_lengths=[2, 3],
+        response_lengths=[2, 3],
+    )
+
+    torch.testing.assert_close(advantages[0], torch.tensor([-1.0, -1.0]))
+    torch.testing.assert_close(advantages[1], torch.tensor([1.0, 1.0, 1.0]))
+    torch.testing.assert_close(returns[0], advantages[0])
+    torch.testing.assert_close(returns[1], advantages[1])

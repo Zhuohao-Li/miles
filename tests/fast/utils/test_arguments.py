@@ -25,6 +25,15 @@ PATH_ARGS = ["--rollout-function-path", "--custom-generate-function-path"]
 REQUIRED_ARGS = ["--rollout-batch-size", "64"]
 
 
+def test_rloo_advantage_estimator_parses():
+    parser = argparse.ArgumentParser()
+    get_miles_extra_args_provider()(parser)
+
+    args = parser.parse_args(["--advantage-estimator", "rloo"] + REQUIRED_ARGS)
+
+    assert args.advantage_estimator == "rloo"
+
+
 def make_class_with_add_arguments():
     class MyFn:
         @classmethod
