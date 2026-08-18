@@ -1,4 +1,6 @@
 from argparse import Namespace
+from collections.abc import Callable
+from dataclasses import dataclass
 
 import torch
 
@@ -13,11 +15,112 @@ from miles.backends.training_utils.parallel import get_parallel_state
 from miles.utils.distributed_utils import distributed_masked_whiten
 
 
+@dataclass(frozen=True)
+class AdvantageEstimatorInput:
+    args: Namespace
+    kl: list[torch.Tensor]
+    rewards: list[float]
+    log_probs: list[torch.Tensor] | None
+    loss_masks: list[torch.Tensor]
+    total_lengths: list[int]
+    response_lengths: list[int]
+    values: list[torch.Tensor] | None
+    max_seq_lens: list[int] | None
+
+
+AdvantageEstimator = Callable[
+    [AdvantageEstimatorInput],
+    tuple[list[torch.Tensor], list[torch.Tensor]],
+]
+_ADVANTAGE_ESTIMATORS: dict[str, AdvantageEstimator] = {}
+
+
+def register_advantage_estimator(name: str) -> Callable[[AdvantageEstimator], AdvantageEstimator]:
+    """Register an advantage estimator under its configuration name."""
+
+    def register(estimator: AdvantageEstimator) -> AdvantageEstimator:
+        if name in _ADVANTAGE_ESTIMATORS:
+            raise ValueError(f"Advantage estimator {name!r} is already registered")
+        _ADVANTAGE_ESTIMATORS[name] = estimator
+        return estimator
+
+    return register
+
+
+def get_advantage_estimator(name: str) -> AdvantageEstimator:
+    """Return a registered estimator or reject an unsupported name."""
+
+    try:
+        return _ADVANTAGE_ESTIMATORS[name]
+    except KeyError as exc:
+        raise NotImplementedError(f"advantage_estimator {name} is not supported. ") from exc
+
+
+@register_advantage_estimator("grpo")
+@register_advantage_estimator("gspo")
+def _compute_grpo(inputs: AdvantageEstimatorInput) -> tuple[list[torch.Tensor], list[torch.Tensor]]:
+    rewards = torch.tensor(inputs.rewards, dtype=torch.float32, device=inputs.kl[0].device)
+    returns = get_grpo_returns(rewards, inputs.kl)
+    return list(returns), returns
+
+
+@register_advantage_estimator("ppo")
+def _compute_ppo(inputs: AdvantageEstimatorInput) -> tuple[list[torch.Tensor], list[torch.Tensor]]:
+    token_rewards = []
+    kl_coef = -inputs.args.kl_coef
+    for kl in inputs.kl:
+        kl *= kl_coef
+        token_rewards.append(kl)
+    return get_advantages_and_returns_batch(
+        total_lengths=inputs.total_lengths,
+        response_lengths=inputs.response_lengths,
+        values_list=inputs.values,
+        rewards_list=token_rewards,
+        terminal_rewards=inputs.rewards,
+        qkv_format=inputs.args.qkv_format,
+        max_seq_lens=inputs.max_seq_lens,
+        loss_masks=inputs.loss_masks,
+        gamma=inputs.args.gamma,
+        lambd=inputs.args.lambd,
+    )
+
+
+@register_advantage_estimator("reinforce_plus_plus")
+def _compute_reinforce_plus_plus(
+    inputs: AdvantageEstimatorInput,
+) -> tuple[list[torch.Tensor], list[torch.Tensor]]:
+    rewards = torch.tensor(inputs.rewards, dtype=torch.float32, device=inputs.kl[0].device)
+    returns = get_reinforce_plus_plus_returns(
+        rewards=rewards,
+        kl=inputs.kl,
+        loss_masks=inputs.loss_masks,
+        response_lengths=inputs.response_lengths,
+        total_lengths=inputs.total_lengths,
+        kl_coef=inputs.args.kl_coef,
+        gamma=inputs.args.gamma,
+    )
+    return list(returns), returns
+
+
+@register_advantage_estimator("reinforce_plus_plus_baseline")
+def _compute_reinforce_plus_plus_baseline(
+    inputs: AdvantageEstimatorInput,
+) -> tuple[list[torch.Tensor], list[torch.Tensor]]:
+    rewards = torch.tensor(inputs.rewards, dtype=torch.float32, device=inputs.kl[0].device)
+    advantages = get_reinforce_plus_plus_baseline_advantages(
+        rewards=rewards,
+        kl=inputs.kl,
+        loss_masks=inputs.loss_masks,
+        kl_coef=inputs.args.kl_coef,
+    )
+    return advantages, advantages
+
+
 def compute_advantages(
     args: Namespace,
     kl: list[torch.Tensor],
     rewards: list[float],
-    log_probs: list[torch.Tensor],
+    log_probs: list[torch.Tensor] | None,
     loss_masks: list[torch.Tensor],
     total_lengths: list[int],
     response_lengths: list[int],
@@ -50,59 +153,20 @@ def compute_advantages(
         `advantages`: List length `B`; `advantages[i]` has shape `[C_i]`.
         `returns`: List length `B`; `returns[i]` has shape `[C_i]`.
     """
-    if args.advantage_estimator in ["grpo", "gspo"]:
-        rewards = torch.tensor(rewards, dtype=torch.float32, device=kl[0].device)
-        returns = get_grpo_returns(rewards, kl)
-        # TODO: is the copy necessary?
-        advantages = [r for r in returns]
-
-    elif args.advantage_estimator == "ppo":
-        terminal_rewards = rewards
-        token_rewards = []
-        kl_coef = -args.kl_coef
-        for k in kl:
-            k *= kl_coef
-            token_rewards.append(k)
-        advantages, returns = get_advantages_and_returns_batch(
+    estimator = get_advantage_estimator(args.advantage_estimator)
+    return estimator(
+        AdvantageEstimatorInput(
+            args=args,
+            kl=kl,
+            rewards=rewards,
+            log_probs=log_probs,
+            loss_masks=loss_masks,
             total_lengths=total_lengths,
             response_lengths=response_lengths,
-            values_list=values,
-            rewards_list=token_rewards,
-            terminal_rewards=terminal_rewards,
-            qkv_format=args.qkv_format,
+            values=values,
             max_seq_lens=max_seq_lens,
-            loss_masks=loss_masks,
-            gamma=args.gamma,
-            lambd=args.lambd,
         )
-
-    elif args.advantage_estimator == "reinforce_plus_plus":
-        rewards = torch.tensor(rewards, dtype=torch.float32, device=kl[0].device)
-        returns = get_reinforce_plus_plus_returns(
-            rewards=rewards,
-            kl=kl,
-            loss_masks=loss_masks,
-            response_lengths=response_lengths,
-            total_lengths=total_lengths,
-            kl_coef=args.kl_coef,
-            gamma=args.gamma,
-        )
-        advantages = [r for r in returns]
-
-    elif args.advantage_estimator == "reinforce_plus_plus_baseline":
-        rewards = torch.tensor(rewards, dtype=torch.float32, device=kl[0].device)
-        advantages = get_reinforce_plus_plus_baseline_advantages(
-            rewards=rewards,
-            kl=kl,
-            loss_masks=loss_masks,
-            kl_coef=args.kl_coef,
-        )
-        returns = advantages
-
-    else:
-        raise NotImplementedError(f"advantage_estimator {args.advantage_estimator} is not supported. ")
-
-    return advantages, returns
+    )
 
 
 def normalize_advantages(
