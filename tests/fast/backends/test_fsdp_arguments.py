@@ -1,9 +1,10 @@
 import dataclasses
 import sys
+from types import SimpleNamespace
 
 import pytest
 
-from miles.backends.fsdp_utils.arguments import FSDPArgs, parse_fsdp_cli
+from miles.backends.fsdp_utils.arguments import FSDPArgs, parse_fsdp_cli, validate_fsdp_args
 
 
 def _parse(monkeypatch: pytest.MonkeyPatch, *argv: str):
@@ -50,3 +51,21 @@ def test_every_bool_gets_both_forms(monkeypatch: pytest.MonkeyPatch) -> None:
         flag = field.name.replace("_", "-")
         assert _parse(monkeypatch, f"--{flag}").__dict__[field.name] is True
         assert _parse(monkeypatch, f"--no-{flag}").__dict__[field.name] is False
+
+
+def test_checkpoint_retention_parses(monkeypatch: pytest.MonkeyPatch) -> None:
+    args = _parse(monkeypatch, "--fsdp-max-checkpoints-to-keep", "3")
+    assert args.fsdp_max_checkpoints_to_keep == 3
+
+
+@pytest.mark.parametrize("value", [0, -1])
+def test_checkpoint_retention_must_be_positive(value: int) -> None:
+    args = SimpleNamespace(
+        actor_num_nodes=1,
+        actor_num_gpus_per_node=1,
+        dp_replicate_size=1,
+        fsdp_max_checkpoints_to_keep=value,
+    )
+
+    with pytest.raises(ValueError, match="fsdp_max_checkpoints_to_keep must be at least 1"):
+        validate_fsdp_args(args)

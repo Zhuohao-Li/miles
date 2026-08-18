@@ -2725,9 +2725,9 @@ def parse_args(add_custom_arguments=None):
                 "pipeline_model_parallel_size is 1."
             )
     else:
-        from miles.backends.fsdp_utils.arguments import validate_hybrid_shard_args
+        from miles.backends.fsdp_utils.arguments import validate_fsdp_args
 
-        validate_hybrid_shard_args(args)
+        validate_fsdp_args(args)
 
     sglang_validate_args(args)
 

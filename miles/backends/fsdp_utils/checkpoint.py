@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
+import shutil
 import time
 from pathlib import Path
 from typing import Any
@@ -73,6 +74,38 @@ def _write_checkpoint_metadata(path: Path, metadata: dict[str, Any]) -> None:
     tmp_path = path.with_suffix(path.suffix + ".tmp")
     tmp_path.write_text(json.dumps(metadata, indent=2, sort_keys=True))
     tmp_path.replace(path)
+
+
+def _checkpoint_step(path: Path) -> int | None:
+    if path.is_symlink() or not path.is_dir() or not path.name.startswith("iter_"):
+        return None
+    step = path.name.removeprefix("iter_")
+    return int(step) if step.isdigit() else None
+
+
+def _prune_checkpoints(base_dir: Path, current_checkpoint: Path, max_checkpoints: int | None) -> None:
+    if max_checkpoints is None:
+        return
+
+    checkpoints = sorted(
+        ((step, path) for path in base_dir.iterdir() if (step := _checkpoint_step(path)) is not None),
+        key=lambda item: item[0],
+        reverse=True,
+    )
+    keep = {current_checkpoint}
+    for _, path in checkpoints:
+        if len(keep) >= max_checkpoints:
+            break
+        keep.add(path)
+
+    for _, path in reversed(checkpoints):
+        if path in keep:
+            continue
+        try:
+            shutil.rmtree(path)
+            logger.info(f"[FSDP] Removed old checkpoint {path}")
+        except OSError:
+            logger.warning(f"[FSDP] Failed to remove old checkpoint {path}", exc_info=True)
 
 
 def load(actor: Any) -> dict[str, Any] | None:
@@ -246,5 +279,10 @@ def save(actor: Any, iteration: int) -> None:
         tracker_file = base_dir / "latest_checkpointed_iteration.txt"
         tracker_file.write_text(str(step_id))
         logger.info(f"[FSDP] Saved checkpoint to {checkpoint_dir}")
+        _prune_checkpoints(
+            base_dir,
+            current_checkpoint=checkpoint_dir,
+            max_checkpoints=getattr(actor.args, "fsdp_max_checkpoints_to_keep", None),
+        )
 
     dist.barrier()

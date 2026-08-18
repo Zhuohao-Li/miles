@@ -62,6 +62,9 @@ class FSDPArgs:
     profile_step_end: int = 12
     tensorboard_dir: str | None = None
 
+    # Checkpointing
+    fsdp_max_checkpoints_to_keep: int | None = None
+
     # YAML bookkeeping
     config: str | None = None
 
@@ -131,3 +134,10 @@ def validate_hybrid_shard_args(args) -> None:
     world_size = args.actor_num_nodes * args.actor_num_gpus_per_node
     if world_size % replicate_size:
         raise ValueError(f"world_size({world_size}) must be divisible by dp_replicate_size({replicate_size})")
+
+
+def validate_fsdp_args(args) -> None:
+    validate_hybrid_shard_args(args)
+    max_checkpoints = getattr(args, "fsdp_max_checkpoints_to_keep", None)
+    if max_checkpoints is not None and max_checkpoints < 1:
+        raise ValueError(f"fsdp_max_checkpoints_to_keep must be at least 1, got {max_checkpoints}")

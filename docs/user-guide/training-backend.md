@@ -380,6 +380,10 @@ and LR scheduler, plus a `latest_checkpointed_iteration.txt` tracker. So `--load
 **parent** directory exactly like the Megatron backend does. These are FSDP-backend
 checkpoints, not `torch_dist` ones, and the two formats are not interchangeable.
 
+`--fsdp-max-checkpoints-to-keep N` bounds the number of FSDP `iter_*` directories. Rank 0
+removes older checkpoints only after the new checkpoint and tracker are complete; the current
+checkpoint is always retained. The default, `None`, keeps every checkpoint.
+
 ### Limits
 
 <Warning>
